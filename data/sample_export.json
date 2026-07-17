@@ -1,0 +1,38 @@
+[
+  {
+    "mrn": "MRN-00123",
+    "name": "Jane Doe",
+    "dob": "1985-04-12",
+    "gender": "F",
+    "record_type": "discharge_summary",
+    "record_date": "2024-01-15",
+    "text": "Patient discharged following appendectomy. No complications. Follow-up in 2 weeks."
+  },
+  {
+    "mrn": "00123",
+    "name": "Jane Doe",
+    "dob": "04/12/1985",
+    "gender": "female",
+    "record_type": "lab",
+    "record_date": "01/20/2024",
+    "text": "CBC within normal limits. WBC 7.2, Hgb 13.5."
+  },
+  {
+    "mrn": "MRN-00456",
+    "name": "John Smith",
+    "dob": null,
+    "gender": "M",
+    "record_type": "imaging",
+    "record_date": "2024-02-01",
+    "text": "Chest X-ray shows no acute cardiopulmonary process."
+  },
+  {
+    "mrn": "MRN-00789",
+    "name": "",
+    "dob": "1990-11-30",
+    "gender": "U",
+    "record_type": "lab",
+    "record_date": "not a date",
+    "text": "Lipid panel: LDL 145, HDL 42, Triglycerides 180."
+  }
+]

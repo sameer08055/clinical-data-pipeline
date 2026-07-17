@@ -1,0 +1,5 @@
+mrn,name,dob,gender,record_type,record_date,text
+MRN-00123,Jane Doe,1985-04-12,F,lab,2024-03-01,Glucose 95 mg/dL fasting. Normal.
+MRN-00123,Jane Doe,1985-04-12,F,lab,2024-03-01,Glucose 95 mg/dL fasting. Normal.
+MRN-00999,Robert Chen,15-Jun-78,1,imaging,2024-03-05,MRI brain without contrast: no acute findings.
+MRN-00456,John Smith,,2,discharge_summary,2024/02/03,Discharged home in stable condition after pneumonia treatment.
