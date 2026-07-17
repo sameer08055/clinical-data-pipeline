@@ -1,3 +1,6 @@
 pydantic>=2.0
 python-dateutil
 pytest
+
+pytest
+fhir.resources>=7.1.0
