@@ -8,6 +8,7 @@ calling sentence-transformers ourselves and feeding raw vectors in - chroma
 already wraps that, no need to manage embeddings by hand.
 """
 from datetime import datetime, date
+import json
 import chromadb
 from chromadb.utils import embedding_functions
 
@@ -66,7 +67,10 @@ def build_index(conn, chroma_path: str = CHROMA_PATH):
             })
 
         # also index the AI summary - lets a search match on diagnoses/concerns
-        # even if that exact wording never appears in a single raw record
+        # even if that exact wording never appears in a single raw record.
+        # We store the full structured summary as JSON in metadata too, since
+        # the frontend detail drawer needs recent_records/anomalies/disclaimer,
+        # not just the short text we embed on.
         summary = get_or_generate_summary(conn, patient_id, bundle)
         summary_text = summary.get("chief_concern", "") + " " + " ".join(summary.get("key_diagnoses", []))
         ids.append(f"{patient_id}-summary")
@@ -77,6 +81,7 @@ def build_index(conn, chroma_path: str = CHROMA_PATH):
             "resource_type": "Summary",
             "date": "",
             "date_epoch": 0,
+            "summary_json": json.dumps(summary),
         })
 
     if ids:

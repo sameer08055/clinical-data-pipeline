@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Clinical Record Search</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #14181F;
+    --muted: #5B6472;
+    --bg: #F7F8FA;
+    --surface: #FFFFFF;
+    --border: #E3E7EC;
+    --accent: #2456A6;
+    --accent-soft: #EAF0FA;
+  }
+  body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  .card-enter { animation: cardIn 240ms ease-out both; }
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .drawer { transition: transform 220ms ease-out; }
+  .drawer-hidden { transform: translateX(100%); }
+
+  /* reference-range style relevance bar - echoes a lab report's range indicator */
+  .relevance-track { background: var(--border); border-radius: 999px; height: 6px; position: relative; overflow: hidden; }
+  .relevance-fill { background: var(--accent); height: 100%; border-radius: 999px; }
+
+  input:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Top bar: search is the whole point of this tool, so it lives front and center, always visible -->
+<header class="sticky top-0 z-20 border-b" style="background: var(--surface); border-color: var(--border);">
+  <div class="max-w-4xl mx-auto px-4 py-4">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="mono text-xs tracking-wider uppercase" style="color: var(--muted);">Clinical Record Search</span>
+    </div>
+    <form id="search-form" role="search" aria-label="Search patient records">
+      <div class="flex flex-col sm:flex-row gap-2">
+        <label for="q" class="sr-only">Search records</label>
+        <input
+          id="q" name="q" type="text" autocomplete="off"
+          placeholder="Search records — e.g. “appendectomy follow up”, “elevated glucose”"
+          class="flex-1 px-4 py-2.5 rounded-md border text-sm"
+          style="border-color: var(--border);"
+        />
+        <button type="submit"
+          class="px-5 py-2.5 rounded-md text-sm font-medium text-white shrink-0"
+          style="background: var(--accent);">
+          Search
+        </button>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <label for="resource_type" class="sr-only">Filter by resource type</label>
+        <select id="resource_type" name="resource_type"
+          class="text-sm px-3 py-1.5 rounded-md border mono" style="border-color: var(--border);">
+          <option value="">All record types</option>
+          <option value="DocumentReference">Document</option>
+          <option value="DiagnosticReport">Diagnostic report</option>
+          <option value="Summary">AI summary</option>
+        </select>
+
+        <label for="date_from" class="sr-only">From date</label>
+        <input id="date_from" name="date_from" type="date"
+          class="text-sm px-3 py-1.5 rounded-md border mono" style="border-color: var(--border);" />
+
+        <span class="text-sm" style="color: var(--muted);">to</span>
+
+        <label for="date_to" class="sr-only">To date</label>
+        <input id="date_to" name="date_to" type="date"
+          class="text-sm px-3 py-1.5 rounded-md border mono" style="border-color: var(--border);" />
+
+        <button type="button" id="clear-filters"
+          class="text-sm px-3 py-1.5 rounded-md border" style="border-color: var(--border); color: var(--muted);">
+          Clear filters
+        </button>
+      </div>
+    </form>
+  </div>
+</header>
+
+<main class="max-w-4xl mx-auto px-4 py-6">
+  <!-- announces result count / status to screen readers without visual clutter -->
+  <p id="status" class="sr-only" aria-live="polite"></p>
+
+  <div id="results" class="flex flex-col gap-3"></div>
+
+  <div id="empty-state" class="hidden text-center py-16">
+    <p class="text-sm" style="color: var(--muted);">No matches. Try different words, or clear your filters.</p>
+  </div>
+
+  <div id="initial-state" class="text-center py-16">
+    <p class="text-sm" style="color: var(--muted);">Type a search above to find records across all patients.</p>
+  </div>
+</main>
+
+<!-- detail drawer -->
+<div id="drawer-overlay" class="hidden fixed inset-0 bg-black/20 z-30"></div>
+<aside id="drawer" class="drawer drawer-hidden fixed top-0 right-0 h-full w-full sm:w-[420px] z-40 shadow-xl overflow-y-auto"
+  style="background: var(--surface);" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+  <div class="p-5">
+    <button id="drawer-close" class="text-sm mb-4" style="color: var(--muted);" aria-label="Close detail panel">
+      ← Back to results
+    </button>
+    <h2 id="drawer-title" class="text-lg font-semibold mb-1"></h2>
+    <p id="drawer-mrn" class="mono text-xs mb-5" style="color: var(--muted);"></p>
+
+    <div id="drawer-body" class="flex flex-col gap-4 text-sm"></div>
+  </div>
+</aside>
+
+<script>
+  const API_URL = "http://127.0.0.1:8000/search"; // update if your API runs elsewhere
+
+  const BADGE_STYLES = {
+    DocumentReference: { label: "Document", bg: "#FCF3E3", fg: "#8A5A0A" },
+    DiagnosticReport:  { label: "Lab",      bg: "#E4F3EF", fg: "#0F6E5B" },
+    Summary:           { label: "AI summary", bg: "#EEF0F4", fg: "#4B5563" },
+  };
+
+  const form = document.getElementById("search-form");
+  const resultsEl = document.getElementById("results");
+  const emptyState = document.getElementById("empty-state");
+  const initialState = document.getElementById("initial-state");
+  const statusEl = document.getElementById("status");
+
+  let lastResults = []; // keep raw results around so the drawer can pull full data client-side
+  let lastFocusedCard = null;
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    runSearch();
+  });
+
+  document.getElementById("clear-filters").addEventListener("click", () => {
+    document.getElementById("resource_type").value = "";
+    document.getElementById("date_from").value = "";
+    document.getElementById("date_to").value = "";
+    if (document.getElementById("q").value.trim()) runSearch();
+  });
+
+  async function runSearch() {
+    const q = document.getElementById("q").value.trim();
+    if (!q) return;
+
+    const resourceType = document.getElementById("resource_type").value;
+    const dateFrom = document.getElementById("date_from").value;
+    const dateTo = document.getElementById("date_to").value;
+
+    initialState.classList.add("hidden");
+    emptyState.classList.add("hidden");
+    statusEl.textContent = "Searching records…";
+    resultsEl.innerHTML = renderSkeletons();
+
+    const params = new URLSearchParams({ q });
+    if (resourceType) params.set("resource_type", resourceType);
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+
+    try {
+      const res = await fetch(`${API_URL}?${params.toString()}`, { method: "POST" });
+      if (!res.ok) throw new Error(`Search failed (${res.status})`);
+      const data = await res.json();
+      lastResults = data.results || [];
+      renderResults(lastResults);
+    } catch (err) {
+      resultsEl.innerHTML = "";
+      statusEl.textContent = "Search failed.";
+      emptyState.classList.remove("hidden");
+      emptyState.querySelector("p").textContent =
+        "Couldn't reach the search service. Is the API running at " + API_URL + "?";
+    }
+  }
+
+  function renderSkeletons() {
+    return Array.from({ length: 3 }).map(() => `
+      <div class="rounded-lg border p-4 animate-pulse" style="border-color: var(--border); background: var(--surface);">
+        <div class="h-3 w-1/3 rounded mb-3" style="background: var(--border);"></div>
+        <div class="h-3 w-2/3 rounded" style="background: var(--border);"></div>
+      </div>
+    `).join("");
+  }
+
+  function renderResults(results) {
+    resultsEl.innerHTML = "";
+    if (results.length === 0) {
+      emptyState.classList.remove("hidden");
+      emptyState.querySelector("p").textContent = "No matches. Try different words, or clear your filters.";
+      statusEl.textContent = "No results found.";
+      return;
+    }
+    statusEl.textContent = `${results.length} result${results.length === 1 ? "" : "s"} found.`;
+
+    results.forEach((r, i) => {
+      const badge = BADGE_STYLES[r.resource_type] || { label: r.resource_type, bg: "#EEF0F4", fg: "#4B5563" };
+      const card = document.createElement("article");
+      card.className = "card-enter rounded-lg border p-4 cursor-pointer";
+      card.style.cssText = "border-color: var(--border); background: var(--surface); animation-delay: " + (i * 40) + "ms;";
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-label", `Open details for ${r.patient_name}, ${badge.label} from ${r.date || "undated record"}`);
+
+      card.innerHTML = `
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div>
+            <p class="font-medium text-sm">${escapeHtml(r.patient_name)}</p>
+            <p class="mono text-xs mt-0.5" style="color: var(--muted);">MRN ${escapeHtml(r.patient_id)}</p>
+          </div>
+          <span class="mono text-[11px] px-2 py-1 rounded-full shrink-0"
+            style="background: ${badge.bg}; color: ${badge.fg};">
+            ${badge.label}
+          </span>
+        </div>
+        <p class="text-sm mb-3" style="color: var(--ink);">${escapeHtml(r.text)}</p>
+        <div class="flex items-center gap-3">
+          <span class="mono text-xs shrink-0" style="color: var(--muted);">${r.date || "—"}</span>
+          <div class="relevance-track flex-1" aria-hidden="true">
+            <div class="relevance-fill" style="width: ${Math.round(r.relevance_score * 100)}%;"></div>
+          </div>
+          <span class="mono text-xs shrink-0" style="color: var(--muted);">${r.relevance_score.toFixed(2)}</span>
+        </div>
+      `;
+
+      card.addEventListener("click", () => openDrawer(r, card));
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDrawer(r, card); }
+      });
+
+      resultsEl.appendChild(card);
+    });
+  }
+
+  // --- drawer ---
+  const drawer = document.getElementById("drawer");
+  const drawerOverlay = document.getElementById("drawer-overlay");
+
+  function openDrawer(result, triggerEl) {
+    lastFocusedCard = triggerEl;
+    document.getElementById("drawer-title").textContent = result.patient_name;
+    document.getElementById("drawer-mrn").textContent = `MRN ${result.patient_id}`;
+
+    const linked = lastResults.filter(r => r.patient_id === result.patient_id);
+    const summaryChunk = linked.find(r => r.resource_type === "Summary" && r.summary_json);
+    const bodyEl = document.getElementById("drawer-body");
+    bodyEl.innerHTML = "";
+
+    if (summaryChunk) {
+      const summary = JSON.parse(summaryChunk.summary_json);
+      bodyEl.innerHTML += `
+        <div>
+          <p class="mono text-xs uppercase tracking-wide mb-1" style="color: var(--muted);">Chief concern</p>
+          <p>${escapeHtml(summary.chief_concern || "—")}</p>
+        </div>
+        <div>
+          <p class="mono text-xs uppercase tracking-wide mb-1" style="color: var(--muted);">Key diagnoses</p>
+          ${renderList(summary.key_diagnoses)}
+        </div>
+        <div>
+          <p class="mono text-xs uppercase tracking-wide mb-1" style="color: var(--muted);">Recent records</p>
+          ${renderList(summary.recent_records)}
+        </div>
+        <div>
+          <p class="mono text-xs uppercase tracking-wide mb-1" style="color: var(--muted);">Flagged anomalies</p>
+          ${renderList(summary.flagged_anomalies, "None noted.")}
+        </div>
+        <p class="text-xs italic pt-2 border-t" style="color: var(--muted); border-color: var(--border);">
+          ${escapeHtml(summary.disclaimer || "AI-generated summary, not a clinical decision")}
+        </p>
+      `;
+    } else {
+      bodyEl.innerHTML = `<p style="color: var(--muted);">No AI summary available in this result set for this patient.</p>`;
+    }
+
+    bodyEl.innerHTML += `
+      <div class="pt-3 border-t" style="border-color: var(--border);">
+        <p class="mono text-xs uppercase tracking-wide mb-2" style="color: var(--muted);">
+          Matching records in this search
+        </p>
+        <ul class="flex flex-col gap-2">
+          ${linked.filter(r => r.resource_type !== "Summary").map(r => `
+            <li class="text-xs">
+              <span class="mono" style="color: var(--muted);">${r.date || "undated"}</span>
+              — ${escapeHtml(r.text)}
+            </li>
+          `).join("") || `<li class="text-xs" style="color: var(--muted);">No other records matched this search.</li>`}
+        </ul>
+      </div>
+    `;
+
+    drawer.classList.remove("drawer-hidden");
+    drawerOverlay.classList.remove("hidden");
+    document.getElementById("drawer-close").focus();
+  }
+
+  function closeDrawer() {
+    drawer.classList.add("drawer-hidden");
+    drawerOverlay.classList.add("hidden");
+    if (lastFocusedCard) lastFocusedCard.focus();
+  }
+
+  document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+  drawerOverlay.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !drawer.classList.contains("drawer-hidden")) closeDrawer();
+  });
+
+  function renderList(items, emptyText = "None noted.") {
+    if (!items || items.length === 0) return `<p style="color: var(--muted);">${emptyText}</p>`;
+    return `<ul class="list-disc pl-4 flex flex-col gap-1">${items.map(i => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+</script>
+
+</body>
+</html>

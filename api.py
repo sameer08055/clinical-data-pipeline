@@ -4,11 +4,15 @@ from whatever's already in bundles.db (run run_fhir_pipeline.py and
 summarize.py first so there's actually something to search).
 """
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from store import init_db
 from search_index import build_index, search as run_search
 
 app = FastAPI(title="Clinical Record Search")
+
+# local dev tool, not a public API - wide open CORS is fine here
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 conn = init_db()
 collection = build_index(conn)
