@@ -18,6 +18,17 @@ def init_db(path: str = DB_PATH):
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # cache key = hash of the patient's record content (see summarize.py) -
+    # so a summary only regenerates when the underlying records actually change
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS summaries (
+            patient_id TEXT NOT NULL,
+            record_hash TEXT NOT NULL,
+            summary_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (patient_id, record_hash)
+        )
+    """)
     conn.commit()
     return conn
 
